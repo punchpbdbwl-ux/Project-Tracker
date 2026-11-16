@@ -9,6 +9,6 @@ window.CF_FIREBASE = const firebaseConfig = {
   projectId: "project-tracker-4b1dd",
   storageBucket: "project-tracker-4b1dd.firebasestorage.app",
   messagingSenderId: "746820997181",
-  appId: "1:746820997181:web:f4e524941c9755eb28da54",
-  measurementId: "G-NQGRDTXLWZ"
+  appId: "1:746820997181:web:b7a31bfcb99738b028da54",
+  measurementId: "G-X1TWFRNK6H"
 };

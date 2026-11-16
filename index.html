@@ -88,10 +88,10 @@ tr.late td:nth-child(8) input{color:var(--red);font-weight:800}
     </table>
     <div class="empty" id="empty" hidden>No projects yet. Select “Add project” to start.</div>
   </div>
-  <p class="note">Every cell is editable. Changes save automatically to the server database and show up for everyone within a few seconds. Assigned time is stamped when you add a project.</p>
+  <p class="note">Every cell is editable. Changes save automatically and appear live for everyone who has the link. Assigned time is stamped when you add a project.</p>
 </main>
 <dialog id="dlg" aria-labelledby="dlgt"><h2 id="dlgt" style="margin:0 0 4px">Categories</h2><p class="note" style="margin:0">Add or remove the choices in the Category dropdown.</p><ul id="catlist"></ul><div class="addrow"><input id="newcat" placeholder="New category name" maxlength="40" aria-label="New category name"><button id="addcat">Add</button></div><div style="text-align:right;margin-top:16px"><button class="alt" id="closedlg">Done</button></div></dialog>
-<script>window.CF_API_URL="";</script>
+<script src="config.js"></script>
 <script>
 const NAMES=["P'Gif","P'Jah","P'Ant","P'Fai","Nat","Gib","Punch","Fifa","P'Nand"];
 const nameOpts=v=>`<option value="">Select name</option>`+NAMES.concat(v&&!NAMES.includes(v)?[v]:[]).map(n=>`<option${n===v?" selected":""}>${esc(n)}</option>`).join("");
@@ -108,16 +108,25 @@ async function api(path,opt={}){
   if(!r.ok||!(r.headers.get("content-type")||"").includes("json"))throw new Error("api "+r.status);
   return r.json();
 }
-function persist(r,now){saveLocal();if(mode!=="server")return;clearTimeout(timers[r.id]);
-  const go=()=>api("/api/tasks/"+encodeURIComponent(r.id),{method:"PUT",body:JSON.stringify(r)}).then(()=>setSync("Saved on server")).catch(()=>setSync("Could not reach server"));
+const pend={};
+function persist(r,now,f){saveLocal();if(mode==="local")return;
+  const p=pend[r.id]||(pend[r.id]={});if(f)p[f]=r[f];else Object.assign(p,r);
+  clearTimeout(timers[r.id]);
+  const go=()=>{const part=pend[r.id];delete pend[r.id];if(!part)return;
+    const ok=()=>setSync("Live: everyone sees your change instantly"),bad=()=>setSync("Could not save. Check your connection");
+    if(mode==="firebase")FB.fs.setDoc(FB.fs.doc(FB.db,"tasks",r.id),{...part,id:r.id,updated:Date.now()},{merge:true}).then(ok).catch(bad);
+    else api("/api/tasks/"+encodeURIComponent(r.id),{method:"PUT",body:JSON.stringify(r)}).then(ok).catch(bad)};
   if(now)go();else timers[r.id]=setTimeout(go,600)}
-function removeTask(id){saveLocal();if(mode==="server")api("/api/tasks/"+encodeURIComponent(id),{method:"DELETE"}).catch(()=>setSync("Could not reach server"))}
+function removeTask(id){saveLocal();const bad=()=>setSync("Could not delete. Check your connection");
+  if(mode==="firebase")FB.fs.deleteDoc(FB.fs.doc(FB.db,"tasks",id)).catch(bad);
+  else if(mode==="server")api("/api/tasks/"+encodeURIComponent(id),{method:"DELETE"}).catch(bad)}
+let FB=null;
 const PAL=["#d2485a","#ebc355","#0f695f","#145070","#960f4b","#87b450","#e68755","#22b4c3","#d7aa7d","#231e1e"];
 try{const c=JSON.parse(localStorage.getItem("cf-cats")||"null");if(Array.isArray(c))CATS=c}catch(e){}
 const catColor=v=>{const i=CATS.indexOf(v);return i<0?"var(--line)":PAL[i%PAL.length]};
 const allCats=()=>CATS.concat([...new Set(data.map(r=>r.kind).filter(k=>k&&!CATS.includes(k)))]);
 const catOpts=v=>'<option value="">No category</option>'+allCats().map(c=>`<option${c===v?" selected":""}>${esc(c)}</option>`).join("");
-function saveCats(){try{localStorage.setItem("cf-cats",JSON.stringify(CATS))}catch(e){}if(mode==="server")api("/api/categories",{method:"PUT",body:JSON.stringify({categories:CATS})}).catch(()=>setSync("Could not reach server"))}
+function saveCats(){try{localStorage.setItem("cf-cats",JSON.stringify(CATS))}catch(e){}if(mode==="firebase")FB.fs.setDoc(FB.fs.doc(FB.db,"meta","categories"),{list:CATS}).catch(()=>setSync("Could not save categories"));else if(mode==="server")api("/api/categories",{method:"PUT",body:JSON.stringify({categories:CATS})}).catch(()=>setSync("Could not reach server"))}
 async function syncCats(){try{const c=await api("/api/categories");if(Array.isArray(c.categories)){CATS=c.categories;try{localStorage.setItem("cf-cats",JSON.stringify(CATS))}catch(e){}}else await api("/api/categories",{method:"PUT",body:JSON.stringify({categories:CATS})})}catch(e){}}
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -150,8 +159,8 @@ function render(){
    .map(([l,n,c])=>`<div class="stat" style="border-bottom:5px solid ${c}"><b>${n}</b><span>${l}</span></div>`).join("");
 }
 $("add").onclick=()=>{data.unshift({id:Date.now()+"",assigned:nowLocal(),title:"",by:"",to:"",kind:CATS[0]||"",link:"",deadline:"",status:"Routine",progress:"To do",remark:"",created:Date.now()});persist(data[0],true);render();const t=document.querySelector("textarea[data-f=title]");t&&t.focus()};
-$("rows").addEventListener("change",e=>{const tr=e.target.closest("tr");if(!tr||!e.target.dataset.f)return;const r=data.find(x=>x.id===tr.dataset.id);r[e.target.dataset.f]=e.target.value;persist(r,true);render()});
-$("rows").addEventListener("input",e=>{if(["title","remark","link","by","to"].includes(e.target.dataset.f)){const r=data.find(x=>x.id===e.target.closest("tr").dataset.id);r[e.target.dataset.f]=e.target.value;persist(r)}});
+$("rows").addEventListener("change",e=>{const tr=e.target.closest("tr");if(!tr||!e.target.dataset.f)return;const r=data.find(x=>x.id===tr.dataset.id);r[e.target.dataset.f]=e.target.value;persist(r,true,e.target.dataset.f);render()});
+$("rows").addEventListener("input",e=>{if(["title","remark","link","by","to"].includes(e.target.dataset.f)){const r=data.find(x=>x.id===e.target.closest("tr").dataset.id);r[e.target.dataset.f]=e.target.value;persist(r,false,e.target.dataset.f)}});
 $("rows").addEventListener("click",e=>{const b=e.target.closest("[data-del]");if(!b)return;if(b.classList.contains("armed")){const id=b.closest("tr").dataset.id;data=data.filter(x=>x.id!==id);removeTask(id);render()}else{b.classList.add("armed");b.textContent="Confirm delete";setTimeout(()=>{b.classList.remove("armed");b.textContent="Delete"},3000)}});
 ["q","fk","fs","fp"].forEach(id=>$(id).addEventListener("input",render));
 render();
@@ -164,7 +173,7 @@ function addCat(){const v=$("newcat").value.trim();if(!v)return;if(CATS.some(c=>
 $("addcat").onclick=addCat;
 $("newcat").addEventListener("keydown",e=>{if(e.key==="Enter")addCat()});
 $("catlist").addEventListener("click",e=>{const b=e.target.closest("[data-rm]");if(!b)return;const i=+b.dataset.rm,c=CATS[i];
-  if(b.classList.contains("armed")){CATS.splice(i,1);data.forEach(r=>{if(r.kind===c){r.kind="";persist(r,true)}});saveCats();drawCats();render()}
+  if(b.classList.contains("armed")){CATS.splice(i,1);data.forEach(r=>{if(r.kind===c){r.kind="";persist(r,true,"kind")}});saveCats();drawCats();render()}
   else{const n=data.filter(r=>r.kind===c).length;b.classList.add("armed");b.textContent=n?"Confirm ("+n+" lose it)":"Confirm";setTimeout(()=>{if(b.isConnected){b.classList.remove("armed");b.textContent="Remove"}},3000)}});
 const editing=()=>{const a=document.activeElement;return a&&a.closest&&a.closest("#rows")&&a.matches("input,textarea")};
 async function load(first){
@@ -173,12 +182,43 @@ async function load(first){
     if(first){mode="server";
       if(!list.length&&data.length){await api("/api/import",{method:"POST",body:JSON.stringify({tasks:data})});return load(false)}}
     if(mode!=="server")return;
-    setSync("Saved on server");
-    await syncCats();if(editing()){pending=true;return}
-    data=list;saveLocal();render();
+    setSync("Live: connected to the team server");
+    await syncCats();applyRemote(list);
   }catch(e){if(first){mode="local";setSync("Browser mode: tasks are saved in this browser only")}else if(mode==="server")setSync("Could not reach server")}
 }
-load(true).then(()=>{if(mode==="server")setInterval(()=>load(false),5000)});
+function renderKeepFocus(){const a=document.activeElement;let st=null;
+  if(a&&a.closest&&a.closest("#rows")&&a.dataset&&a.dataset.f){let s0=null,e0=null;try{s0=a.selectionStart;e0=a.selectionEnd}catch(e){}st={id:a.closest("tr").dataset.id,f:a.dataset.f,s:s0,e:e0}}
+  render();
+  if(st){const el=document.querySelector('#rows tr[data-id="'+st.id+'"] [data-f="'+st.f+'"]');if(el){el.focus();try{if(st.s!=null)el.setSelectionRange(st.s,st.e)}catch(e){}}}}
+function applyRemote(list){const a=document.activeElement,inRows=a&&a.closest&&a.closest("#rows")&&a.dataset&&a.dataset.f;
+  const ed=inRows?a.closest("tr").dataset.id:null,mine=ed?data.find(x=>x.id===ed):null;
+  data=list.slice().sort((x,y)=>(y.created||0)-(x.created||0));
+  if(mine){const i=data.findIndex(x=>x.id===ed);if(i>=0)data[i]=Object.assign({},data[i],{[a.dataset.f]:mine[a.dataset.f]})}
+  saveLocal();
+  if(inRows&&a.matches("select,input[type=datetime-local]")){pending=true;return}
+  renderKeepFocus()}
+let seeded=false,firstCats=true;
+async function initFirebase(){
+  try{
+    const V="https://www.gstatic.com/firebasejs/10.14.1/";
+    const [app,fs]=await Promise.all([import(V+"firebase-app.js"),import(V+"firebase-firestore.js")]);
+    FB={fs,db:fs.getFirestore(app.initializeApp(window.CF_FIREBASE))};
+    mode="firebase";setSync("Connecting...");
+    fs.onSnapshot(fs.collection(FB.db,"tasks"),snap=>{
+      const list=snap.docs.map(d=>d.data());
+      if(!list.length&&!snap.metadata.fromCache&&!seeded&&data.length){seeded=true;data.forEach(r=>persist(r,true))}
+      setSync(navigator.onLine?"Live: changes appear instantly for everyone":"Offline: changes will sync when you reconnect");
+      applyRemote(list);
+    },err=>{mode="local";setSync("Cannot reach Firebase ("+(err.code||"error")+"). Check config.js and the rules.")});
+    fs.onSnapshot(fs.doc(FB.db,"meta","categories"),d=>{
+      if(d.exists()&&Array.isArray(d.data().list)){CATS=d.data().list;try{localStorage.setItem("cf-cats",JSON.stringify(CATS))}catch(e){}
+        if($("dlg").open)drawCats();renderKeepFocus()}
+      else if(!d.exists()&&!d.metadata.fromCache&&firstCats){firstCats=false;fs.setDoc(d.ref,{list:CATS}).catch(()=>{})}
+    },()=>{});
+  }catch(e){mode="local";setSync("Browser mode: could not load Firebase")}
+}
+if(window.CF_FIREBASE&&window.CF_FIREBASE.apiKey)initFirebase();
+else load(true).then(()=>{if(mode==="server"){try{const es=new EventSource(API+"/api/stream?code="+encodeURIComponent(code));es.onmessage=()=>load(false)}catch(e){}setInterval(()=>load(false),30000)}});
 const download=(name,text,type)=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
 const stamp=()=>new Date().toISOString().slice(0,10);
 $("bak").onclick=()=>download("cityfresh-backup-"+stamp()+".json",JSON.stringify({categories:CATS,tasks:data},null,2),"application/json");

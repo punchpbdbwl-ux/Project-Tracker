@@ -1,0 +1,11 @@
+services:
+  tracker:
+    build: .
+    ports: ["3000:3000"]
+    environment:
+      ACCESS_CODE: "change-me"      # team password, remove the line for no password
+    volumes:
+      - tracker-data:/data          # keeps your tasks when the container restarts
+    restart: unless-stopped
+volumes:
+  tracker-data:

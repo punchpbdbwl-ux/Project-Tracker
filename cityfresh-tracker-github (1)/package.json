@@ -1,0 +1,10 @@
+{
+  "name": "cityfresh-tracker",
+  "version": "1.0.0",
+  "description": "City Fresh project tracker with its own tiny file database",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "private": true
+}
